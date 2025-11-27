@@ -25,13 +25,11 @@ const client = new Client({
     intents: [GatewayIntentBits.Guilds]
 });
 
-// Memória temporária dos sorteios
 const sorteiosAtivos = new Map();
 
 client.once('ready', async () => {
     console.log(`🎉 Bot de Sorteio logado como ${client.user.tag}`);
 
-    // Configuração do Comando
     const data = [{
         name: 'sorteio',
         description: 'Inicia um novo sorteio',
@@ -51,20 +49,19 @@ client.once('ready', async () => {
         ]
     }];
 
-    // --- REGISTRO DO COMANDO (INSTANTÂNEO) ---
+    // REGISTRO DE COMANDO
     const guildId = process.env.MAIN_GUILD;
-
     if (guildId) {
         const guild = client.guilds.cache.get(guildId);
         if (guild) {
             await guild.commands.set(data);
-            console.log(`✅ SUCESSO: Comando /sorteio registrado no servidor: ${guild.name}`);
+            console.log(`✅ Comando /sorteio registrado no servidor: ${guild.name}`);
         } else {
-            console.log(`❌ ERRO: O ID ${guildId} foi colocado no Render, mas o bot não está nesse servidor.`);
+            console.log(`❌ ERRO: ID da guilda não encontrado.`);
         }
     } else {
         await client.application.commands.set(data);
-        console.log("⚠️ AVISO: Você não configurou a MAIN_GUILD no Render. O comando pode demorar 1 hora para aparecer.");
+        console.log("⚠️ Registrando globalmente (lento).");
     }
 });
 
@@ -75,12 +72,14 @@ client.on('interactionCreate', async interaction => {
         const premio = interaction.options.getString('premio');
         const minutos = interaction.options.getInteger('minutos');
         
+        // A SOMA DO TEMPO (Agora + Minutos)
         const tempoMs = minutos * 60 * 1000;
         const fimTimestamp = Math.floor((Date.now() + tempoMs) / 1000);
 
         const embed = new EmbedBuilder()
             .setTitle('🎉 NOVO SORTEIO! 🎉')
-            .setDescription(`**Prêmio:** ${premio}\n**Tempo:** ${minutos} minutos\n**Termina:** <t:${fimTimestamp}:R>`)
+            // AQUI ESTÁ A MUDANÇA: Usei <t:${fimTimestamp}:t> para mostrar o horário (ex: 16:30)
+            .setDescription(`**Prêmio:** ${premio}\n**Duração:** ${minutos} minutos\n**Termina às:** <t:${fimTimestamp}:t>`)
             .setColor(0xF4D03F)
             .setFooter({ text: `Patrocinado por: ${interaction.user.username}` });
 
@@ -94,27 +93,24 @@ client.on('interactionCreate', async interaction => {
 
         const msg = await interaction.reply({ embeds: [embed], components: [button], fetchReply: true });
 
-        // Salva na memória
         sorteiosAtivos.set(msg.id, {
             participantes: new Set(),
             premio: premio
         });
 
-        // Temporizador para acabar
+        // Temporizador
         setTimeout(async () => {
             const dados = sorteiosAtivos.get(msg.id);
             if (!dados) return;
 
             const lista = Array.from(dados.participantes);
             let textoFinal = "Sorteio cancelado. Ninguém participou. 😢";
-            let corFinal = 0xFF0000; // Vermelho
+            let corFinal = 0xFF0000;
 
             if (lista.length > 0) {
                 const ganhador = lista[Math.floor(Math.random() * lista.length)];
                 textoFinal = `👑 **PARABÉNS!** <@${ganhador}> ganhou **${dados.premio}**!`;
-                corFinal = 0x00FF00; // Verde
-                
-                // Avisa no chat
+                corFinal = 0x00FF00;
                 msg.channel.send(textoFinal).catch(() => {});
             }
 
@@ -137,23 +133,19 @@ client.on('interactionCreate', async interaction => {
         }, tempoMs);
     }
 
-    // --- LÓGICA DO BOTÃO DE ENTRAR ---
+    // --- LÓGICA DO BOTÃO ---
     if (interaction.isButton() && interaction.customId === 'entrar_sorteio') {
         const dados = sorteiosAtivos.get(interaction.message.id);
-        
-        if (!dados) {
-            return interaction.reply({ content: '❌ Esse sorteio já acabou.', ephemeral: true });
-        }
+        if (!dados) return interaction.reply({ content: '❌ Já acabou.', ephemeral: true });
 
         if (dados.participantes.has(interaction.user.id)) {
             dados.participantes.delete(interaction.user.id);
-            await interaction.reply({ content: '❌ Você saiu do sorteio.', ephemeral: true });
+            await interaction.reply({ content: '❌ Saiu do sorteio.', ephemeral: true });
         } else {
             dados.participantes.add(interaction.user.id);
-            await interaction.reply({ content: '✅ Você entrou no sorteio! Boa sorte.', ephemeral: true });
+            await interaction.reply({ content: '✅ Entrou no sorteio!', ephemeral: true });
         }
 
-        // Atualiza o contador do botão
         const btnAtualizado = new ActionRowBuilder().addComponents(
             new ButtonBuilder()
                 .setCustomId('entrar_sorteio')
