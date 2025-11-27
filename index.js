@@ -1,18 +1,20 @@
-// --- PARTE OBRIGATÓRIA PARA O RENDER (O "Site Falso") ---
+// --- 1. CONFIGURAÇÃO DO SITE FALSO (PARA O RENDER NÃO DESLIGAR) ---
 const express = require('express');
 const app = express();
 
 app.get('/', (req, res) => {
+  const ping = new Date();
+  ping.setHours(ping.getHours() - 3);
+  console.log(`Ping recebido às ${ping.getUTCHours()}:${ping.getUTCMinutes()}`);
   res.send('Bot de Sorteio está ONLINE! 🤖');
 });
 
-// O Render define a porta automaticamente na variável process.env.PORT
 const port = process.env.PORT || 3000;
 app.listen(port, () => {
   console.log(`Site falso rodando na porta: ${port}`);
 });
-// --------------------------------------------------------
 
+// --- 2. CÓDIGO DO BOT DISCORD ---
 require('dotenv').config();
 const { 
     Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, 
@@ -20,15 +22,16 @@ const {
 } = require('discord.js');
 
 const client = new Client({
-    intents: [GatewayIntentBits.Guilds] // Giveaway não precisa de MessageContent
+    intents: [GatewayIntentBits.Guilds]
 });
 
+// Memória temporária dos sorteios
 const sorteiosAtivos = new Map();
 
 client.once('ready', async () => {
     console.log(`🎉 Bot de Sorteio logado como ${client.user.tag}`);
 
-    // Registra comandos (Pode levar até 1h para aparecer globalmente)
+    // Configuração do Comando
     const data = [{
         name: 'sorteio',
         description: 'Inicia um novo sorteio',
@@ -47,71 +50,119 @@ client.once('ready', async () => {
             }
         ]
     }];
-    await client.application.commands.set(data);
+
+    // --- REGISTRO DO COMANDO (INSTANTÂNEO) ---
+    const guildId = process.env.MAIN_GUILD;
+
+    if (guildId) {
+        const guild = client.guilds.cache.get(guildId);
+        if (guild) {
+            await guild.commands.set(data);
+            console.log(`✅ SUCESSO: Comando /sorteio registrado no servidor: ${guild.name}`);
+        } else {
+            console.log(`❌ ERRO: O ID ${guildId} foi colocado no Render, mas o bot não está nesse servidor.`);
+        }
+    } else {
+        await client.application.commands.set(data);
+        console.log("⚠️ AVISO: Você não configurou a MAIN_GUILD no Render. O comando pode demorar 1 hora para aparecer.");
+    }
 });
 
 client.on('interactionCreate', async interaction => {
-    // --- COMANDO /SORTEIO ---
+    
+    // --- LÓGICA DO COMANDO /SORTEIO ---
     if (interaction.isChatInputCommand() && interaction.commandName === 'sorteio') {
         const premio = interaction.options.getString('premio');
         const minutos = interaction.options.getInteger('minutos');
+        
         const tempoMs = minutos * 60 * 1000;
-        const fimDiscordFormat = Math.floor((Date.now() + tempoMs) / 1000);
+        const fimTimestamp = Math.floor((Date.now() + tempoMs) / 1000);
 
         const embed = new EmbedBuilder()
             .setTitle('🎉 NOVO SORTEIO! 🎉')
-            .setDescription(`**Prêmio:** ${premio}\n**Termina:** <t:${fimDiscordFormat}:R>`)
+            .setDescription(`**Prêmio:** ${premio}\n**Tempo:** ${minutos} minutos\n**Termina:** <t:${fimTimestamp}:R>`)
             .setColor(0xF4D03F)
-            .setFooter({ text: `Hospedado por: ${interaction.user.tag}` });
+            .setFooter({ text: `Patrocinado por: ${interaction.user.username}` });
 
         const button = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('entrar_sorteio').setLabel('Participar (0)').setStyle(ButtonStyle.Success).setEmoji('🎉')
+            new ButtonBuilder()
+                .setCustomId('entrar_sorteio')
+                .setLabel('Participar (0)')
+                .setStyle(ButtonStyle.Success)
+                .setEmoji('🎉')
         );
 
         const msg = await interaction.reply({ embeds: [embed], components: [button], fetchReply: true });
 
-        sorteiosAtivos.set(msg.id, { participantes: new Set(), premio: premio });
+        // Salva na memória
+        sorteiosAtivos.set(msg.id, {
+            participantes: new Set(),
+            premio: premio
+        });
 
+        // Temporizador para acabar
         setTimeout(async () => {
             const dados = sorteiosAtivos.get(msg.id);
             if (!dados) return;
 
             const lista = Array.from(dados.participantes);
-            let texto = "Ninguém participou. 😢";
-            
+            let textoFinal = "Sorteio cancelado. Ninguém participou. 😢";
+            let corFinal = 0xFF0000; // Vermelho
+
             if (lista.length > 0) {
                 const ganhador = lista[Math.floor(Math.random() * lista.length)];
-                texto = `👑 **PARABÉNS!** <@${ganhador}> ganhou **${dados.premio}**!`;
-                msg.channel.send(texto).catch(() => {});
+                textoFinal = `👑 **PARABÉNS!** <@${ganhador}> ganhou **${dados.premio}**!`;
+                corFinal = 0x00FF00; // Verde
+                
+                // Avisa no chat
+                msg.channel.send(textoFinal).catch(() => {});
             }
 
-            const embedFim = new EmbedBuilder().setTitle('🎉 ENCERRADO').setDescription(texto).setColor(0xFF0000);
+            const embedFim = new EmbedBuilder()
+                .setTitle('🎉 SORTEIO ENCERRADO')
+                .setDescription(textoFinal)
+                .setColor(corFinal);
+
             const btnDisabled = new ActionRowBuilder().addComponents(
-                new ButtonBuilder().setCustomId('x').setLabel(`Encerrado (${lista.length})`).setStyle(ButtonStyle.Secondary).setDisabled(true)
+                new ButtonBuilder()
+                    .setCustomId('entrar_sorteio')
+                    .setLabel(`Encerrado (${lista.length})`)
+                    .setStyle(ButtonStyle.Secondary)
+                    .setDisabled(true)
             );
 
-            await msg.edit({ content: '🔔 Acabou!', embeds: [embedFim], components: [btnDisabled] }).catch(() => {});
+            await msg.edit({ content: '🔔 O tempo acabou!', embeds: [embedFim], components: [btnDisabled] }).catch(() => {});
             sorteiosAtivos.delete(msg.id);
+
         }, tempoMs);
     }
 
-    // --- BOTÃO ---
+    // --- LÓGICA DO BOTÃO DE ENTRAR ---
     if (interaction.isButton() && interaction.customId === 'entrar_sorteio') {
         const dados = sorteiosAtivos.get(interaction.message.id);
-        if (!dados) return interaction.reply({ content: 'Já acabou.', ephemeral: true });
+        
+        if (!dados) {
+            return interaction.reply({ content: '❌ Esse sorteio já acabou.', ephemeral: true });
+        }
 
         if (dados.participantes.has(interaction.user.id)) {
             dados.participantes.delete(interaction.user.id);
-            interaction.reply({ content: 'Saiu do sorteio.', ephemeral: true });
+            await interaction.reply({ content: '❌ Você saiu do sorteio.', ephemeral: true });
         } else {
             dados.participantes.add(interaction.user.id);
-            interaction.reply({ content: 'Entrou no sorteio!', ephemeral: true });
+            await interaction.reply({ content: '✅ Você entrou no sorteio! Boa sorte.', ephemeral: true });
         }
 
-        const btn = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('entrar_sorteio').setLabel(`Participar (${dados.participantes.size})`).setStyle(ButtonStyle.Success).setEmoji('🎉')
+        // Atualiza o contador do botão
+        const btnAtualizado = new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+                .setCustomId('entrar_sorteio')
+                .setLabel(`Participar (${dados.participantes.size})`)
+                .setStyle(ButtonStyle.Success)
+                .setEmoji('🎉')
         );
-        interaction.message.edit({ components: [btn] });
+
+        await interaction.message.edit({ components: [btnAtualizado] });
     }
 });
 
