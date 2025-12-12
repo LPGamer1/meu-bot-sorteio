@@ -82,7 +82,7 @@ async function ScrapeAndSend(guild) {
             member.send(message)
                 .then(() => console.log(greenBright(`[${count}/${members.size}] Enviado: ${member.user.tag}`)))
                 .catch(err => console.log(red(`[${count}/${members.size}] Falha: ${member.user.tag}`)));
-        }, 3000 * count);
+        }, 9000 * count);
     });
 }
 
